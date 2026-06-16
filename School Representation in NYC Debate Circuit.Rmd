@@ -1,0 +1,173 @@
+---
+title: "Can Nonprofits Make High School Debate More Accessible? It's Debatable."
+subtitle: "An analysis of the Brooklyn Debate League's impact on NYC tournament representation."
+output: html_document
+---
+**Eshaal Ubaid**
+
+
+Perspiring nerds in suits yelling at each other about nuclear arms deals... that’s the image that comes to mind when you think “debater.”
+
+As a former debater, I can't really defend myself there. Yet debate is more than just an ego boost for high schoolers. It is an avenue for social mobility, college access, and critical thinking skills that many adults never develop. For many students, it is also their only chance to travel and build lasting friendships.
+
+That inherent value is part of why debate is so paywalled. Wealthier families pay for private coaching, travel, and tournament fees to get their kids ahead. In New York City, [the most segregated school district in the country](https://civilrightsproject.ucla.edu/press-releases/new-york-schools-most-segregated-in-the-nation/), most debate teams are come from private schools in wealthier areas. Most debaters know that the same few schools get to state championships and nationals over and over again.
+
+The Brooklyn Debate League (BDL) is a nonprofit that has spent the last decade addressing this inequity, employing a partnership model that builds teams in schools that previously did not have them. The testimonials are compelling evidence of its success. However, I was wondering how much of a difference it actually makes on representation. **Does the BDL model actually improve school representation on the NYC circuit?**
+
+To answer this, I compared the makeup of NYC schools, from the [NYS Education Department's (NYSED) records](https://eservices.nysed.gov/sedreports/ReportList?id=1), to the most recent NYC debate circuit with and without BDL schools included. Representation here comes down to the distribution of the NYSED's school classifications: public, private, parochial, and charter. Each uses a different funding structure, clueing us in on student socioeconomic status.
+
+Here are the breakdowns:
+
+*Tournament data provided by the BDL. Originally from [Tabroom.com](tabroom.com), a database of all high school debate tournaments.*
+```{r, echo=F, include=F}
+#PART 1: SETUP
+#packages
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r, echo=F, include=F}
+#datasets
+tourneys <- read.csv("Data/Year Over Year Tournament Data - Tourney Data.csv") #this set has info on schools that participated in the last full active debate season, pulled from Tabroom.com (has info on every debate tournament ever hosted)
+nycschools <- read.csv("Data/All Institutions CSV.csv") #NYC DOE's updated data on active schools
+
+#renaming nycschools cols; it imported headers as row 1
+cleannycschools <- nycschools
+colnames(cleannycschools) <- nycschools[1,]
+cleannycschools <- cleannycschools[-1,] #removing that row because header makes it redundant
+
+#filtering nycschools for JUST high schools (dataset includes NYC colleges) and necessary info: according to the key on the website, this corresponds to: type 17 and subtypes 1-10 (public); type 17 and subtype 11 (charter); type 14 subtype 21-22 (private); type 14 1-20 (parochial).
+
+colnames(nycschools) #to see preexisting names
+nychighschools = cleannycschools |>
+  rename(ins.type = `INST Type Code`, #making headers more convenient
+         ins.subtype = `INST Sub Type Code`,
+         school = `Legal Name`,
+         long.type = `INST Sub Type Description`,
+         code = `Institution ID`) |>
+  filter(!is.na(ins.type) | !is.na(ins.subtype)) |> #removing NA values so the filter runs properly later
+  mutate(ins.type = as.numeric(ins.type), ins.subtype = as.numeric(ins.subtype)) |> #ensuring the right class for the next filter
+  filter((ins.type == 17 & ins.subtype %in% 1:11) | (ins.type == 14 & ins.subtype %in% 1:22)) |>
+  select(code, school, ins.type, ins.subtype, long.type) |>
+  distinct(code, .keep_all = TRUE)
+
+nychighschools$category = case_when(
+  (nychighschools$ins.type==17) & (nychighschools$ins.subtype %in% 1:10) ~ "public", #matching the key's types/subtypes to categories
+  (nychighschools$ins.type==14) & (nychighschools$ins.subtype %in% 21:22) ~ "private",
+  (nychighschools$ins.type==17) & (nychighschools$ins.subtype==11) ~ "charter",
+  (nychighschools$ins.type==14) & (nychighschools$ins.subtype %in% 1:20) ~ "parochial")
+
+head(nychighschools)
+
+#making sure tourneys has no duplicates
+tourneys = tourneys |>
+  distinct(School, .keep_all=T)
+
+#recoding school types for convenience
+table(tourneys$School.Type) #to see types
+tourneys$category = case_when(
+  (tourneys$School.Type=="NYC public school" | tourneys$School.Type=="Screened NYC public school") ~ "public",
+  tourneys$School.Type=="Private school (tuition-based)" ~ "private",
+  tourneys$School.Type=="NYC Public Charter" ~ "charter",
+  tourneys$School.Type=="Parochial school (tuition)" ~ "parochial")
+head(tourneys)
+
+#set of just the BDL schools to analyze later
+bdl = tourneys |>
+  filter(BDL.Partner==T)
+
+#finally, creating a set without any bdl partner schools to compare frequencies later
+class(tourneys$BDL.Partner)
+nobdl = tourneys |>
+  filter(BDL.Partner==F)
+```
+
+```{r, echo=FALSE, include=F}
+#PART 2: creating representation tables
+
+#making a function for representation stats so i don't have to do it manually every time
+
+representation <- function(representation) #the "x" is representation here because i want it to work on whole data sets
+{representation |> 
+    count(category) |> #tells what categories there are and how many of each (n)
+    mutate(percent=100*n/sum(n)) |> #finds percent of each
+    select(school.type = category, percent) |> #noticing an NA row for some of these, those come from the out of state schools which we are not including anyway
+    filter(!is.na(school.type))} #filtering out that out of school NA row
+
+nyc.school.representation <- representation(nychighschools) #all nyc schools
+tourney.school.representation <- representation(tourneys) #baseline debate circuit (no bdl schools)
+nobdl.school.representation <- representation(nobdl) #circuit with bdl schools included
+
+#merging these tables into one for stacked bar convenience later
+representation.comparison <- merge(nyc.school.representation, tourney.school.representation, by.x="school.type", by.y="school.type")
+representation.comparison <- merge(representation.comparison,nobdl.school.representation,by.x="school.type", by.y="school.type")
+representation.comparison
+
+#styling + reordering the table to be more intuitive to the reader
+representation.comparison <- representation.comparison[, c(1,2,4,3)] 
+colnames(representation.comparison) <- c("School Type", "All NYC Schools", "Tournament Makeup Without BDL", "Tournament Makeup With BDL") #renaming so they look nice on the final plot
+representation.comparison$`School Type` <- c("Charter","Parochial","Private","Public") #more proper renaming
+representation.comparison[,2:4] <- round(representation.comparison[,2:4], 2)
+```
+
+```{r,echo=F, include=F}
+#PART 3: visualizing
+#want to graph with school type on the x-axis and 3 bars each for each condition; need to pivot to make the table structure match
+long.representation.comparison <- representation.comparison |>
+  pivot_longer(
+    cols = -`School Type`,
+    names_to = "school.types",
+    values_to = "percentage")
+head(long.representation.comparison)
+
+graph.stacked = long.representation.comparison |>
+  ggplot(aes(x = `School Type`, y = percentage, fill = school.types)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c(
+    "All NYC Schools" = "lightgreen", #naming correctly such that the bars match the values from earlier
+    "Tournament Makeup Without BDL" = "orange",
+    "Tournament Makeup With BDL" = "purple")) +
+  labs(x = "School Type",
+       y = "Percent of School Type",
+       fill = "Group/Organization",
+       title = "School Representation on the NYC Debate Circuit") +
+  theme_minimal()
+
+```
+
+```{r,echo=F}
+graph.stacked
+```
+
+
+Evidently there’s a long way to go in order to make the debate circuit truly representative of NYC’s school makeup!
+
+The BDL makes the biggest difference on charter school representation. It's effectively brought that to the true makeup of about 10%, which is remarkable. This checks out because charter schools are tuition-free and often managed by nonprofits, making them more likely to be Title 1 schools (schools that receive funding to specifically serve low-income students).
+
+However, the BDL barely improves public school representation or corrects for private school overrepresentation despite public schools comprising most of NYC's school makeup. Perhaps this is because public schools have more bureaucratic red tape in place to form partnerships, or perhaps the charter school focus is intentional. The distribution of Title 1 schools the BDL serves confirms charter school dominance:
+
+```{r, echo=F, include=F}
+#PART 4: Finding the Title 1 School Breakdown
+
+#% title 1 schools (schools that are funded specifically to support low income, underserved students)
+bdl.title1 = filter(bdl, Title.1.==T)
+nrow(bdl.title1)/nrow(bdl) #% SCHOOLS THAT ARE TITLE 1
+
+#what categories these schools belong to
+bdl.percent.title1.category = bdl |>
+  select(category)
+title1breakdown = as.data.frame(table(bdl.title1$category)*100/nrow(bdl.title1))
+colnames(title1breakdown) <- c("Title 1 School Type","Percent of All Title 1 Schools")
+```
+
+```{r, echo=F, include=T}
+
+kableExtra::kable(title1breakdown) #putting them into a neat table
+
+```
+
+If the BDL's goal is to improve Title 1 representation in debate by way of charter schools, it’s doing pretty well. Yet if actual school type is part of that goal, then now might be a good time to create more public school teams to bring that ~10% closer to the true makeup of about 50%. It won't be easy without legislative support (e.g., [a curriculum mandate like Florida's](https://www.fldoe.org/core/fileparse.php/19930/urlt/2-2.pdf)).
+
+Still, this progress means students are now going to major tournaments that they wouldn’t have been able to attend otherwise. That’s some evidence that the model is working. It means that underrepresented voices are being increasingly heard in some of the fiercest rounds in the country.
+
+The ultimate reward for establishing programs like this is giving underserved students opportunities to see their potential. Measuring the true impact of debate is hard, but I think one of the BDL’s debaters describes it best: “They saw how much I could grow and what I could become, even if I didn’t.”
